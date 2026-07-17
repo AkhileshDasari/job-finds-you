@@ -25,9 +25,10 @@ from config import COMPANIES
 from keywords import SEARCH_TERMS, is_relevant, classify_type, extract_stipend, is_location_relevant
 from scrapers.workday import fetch_workday_jobs, fetch_workday_job_description
 from scrapers.json_apis import fetch_google_jobs, fetch_microsoft_jobs, fetch_apple_jobs, fetch_amazon_jobs
+from scrapers.eightfold import fetch_eightfold_jobs
 from scrapers.fallback import build_fallback_rows
 
-REAL_SCRAPE_METHODS = {"workday", "google", "microsoft", "apple", "amazon"}
+REAL_SCRAPE_METHODS = {"workday", "google", "microsoft", "apple", "amazon", "eightfold"}
 
 
 def scrape_company(company, session, with_salary=False):
@@ -63,6 +64,23 @@ def scrape_company(company, session, with_salary=False):
         fetch_fn = {"google": fetch_google_jobs, "microsoft": fetch_microsoft_jobs,
                     "apple": fetch_apple_jobs, "amazon": fetch_amazon_jobs}[method]
         jobs = fetch_fn(SEARCH_TERMS, session=session)
+        rows = []
+        for j in jobs:
+            if not is_relevant(j["title"]):
+                continue
+            if not is_location_relevant(j.get("location", "")):
+                continue
+            rows.append({
+                "Company": name, "Category": company["category"],
+                "Role Title": j["title"], "Type": classify_type(j["title"]),
+                "Location": j.get("location", "Not specified"),
+                "Apply Link": j["link"], "Stipend / Salary": "Not specified",
+                "Posted": j.get("posted", ""),
+            })
+        return rows
+
+    if method == "eightfold":
+        jobs = fetch_eightfold_jobs(company["tenant"], company["domain"], SEARCH_TERMS, session=session)
         rows = []
         for j in jobs:
             if not is_relevant(j["title"]):
