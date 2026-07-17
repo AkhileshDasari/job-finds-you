@@ -125,7 +125,7 @@ def fetch_amazon_jobs(search_terms, session=None, delay=0.3):
                 resp = session.get(
                     "https://www.amazon.jobs/en/search.json",
                     params={"base_query": term, "offset": offset, "result_limit": 20, "sort": "recent"},
-                    headers=HEADERS, timeout=20,
+                    headers={**HEADERS, "Accept-Encoding": "gzip, deflate"}, timeout=20,
                 )
                 resp.raise_for_status()
                 data = resp.json()
