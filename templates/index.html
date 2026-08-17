@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Scraper GUI</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Job Scraper</h1>
+            <p>Scrape entry-level & internship roles from top MNCs</p>
+        </header>
+
+        <div class="controls">
+            <button id="scrapeBtn" class="btn btn-primary" onclick="startScraping()">
+                <span id="btnText">Start Scraping</span>
+                <span id="spinner" class="spinner" style="display: none;"></span>
+            </button>
+            
+            <label class="checkbox-label">
+                <input type="checkbox" id="withSalary">
+                <span>Extract salary info (slower)</span>
+            </label>
+        </div>
+
+        <div id="progress" class="progress-box" style="display: none;">
+            <div id="progressText" class="progress-text">Starting...</div>
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+        </div>
+
+        <div id="error" class="error-box" style="display: none;">
+            <span id="errorText"></span>
+        </div>
+
+        <div id="resultsContainer" class="results-container" style="display: none;">
+            <div class="results-header">
+                <h2>Results</h2>
+                <span id="resultCount" class="result-count"></span>
+            </div>
+
+            <div class="filters">
+                <input type="text" id="searchInput" placeholder="Search by company, role, location...">
+                <select id="categoryFilter">
+                    <option value="">All Categories</option>
+                    <option value="IT / Tech">IT / Tech</option>
+                </select>
+            </div>
+
+            <table id="resultsTable" class="results-table">
+                <thead>
+                    <tr>
+                        <th>Company</th>
+                        <th>Role Title</th>
+                        <th>Location</th>
+                        <th>Type</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                </tbody>
+            </table>
+
+            <div class="pagination" id="pagination"></div>
+        </div>
+
+        <div id="emptyState" class="empty-state">
+            <p>No results yet. Click "Start Scraping" to begin!</p>
+        </div>
+    </div>
+
+    <script>
+        let allResults = [];
+        let filteredResults = [];
+        let currentPage = 0;
+        const resultsPerPage = 20;
+
+        async function startScraping() {
+            const btn = document.getElementById('scrapeBtn');
+            const withSalary = document.getElementById('withSalary').checked;
+            
+            btn.disabled = true;
+            document.getElementById('progress').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('spinner').style.display = 'inline-block';
+            document.getElementById('btnText').textContent = 'Scraping...';
+
+            try {
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ with_salary: withSalary })
+                });
+
+                if (!response.ok) throw new Error('Failed to start scraping');
+
+                // Poll for status
+                const statusInterval = setInterval(async () => {
+                    const statusRes = await fetch('/api/status');
+                    const status = await statusRes.json();
+                    
+                    document.getElementById('progressText').textContent = status.progress;
+
+                    if (!status.is_scraping) {
+                        clearInterval(statusInterval);
+                        
+                        if (status.error) {
+                            document.getElementById('errorText').textContent = status.error;
+                            document.getElementById('error').style.display = 'block';
+                        } else {
+                            // Load results
+                            const resultsRes = await fetch('/api/results');
+                            const resultsData = await resultsRes.json();
+                            allResults = resultsData.results;
+                            filteredResults = [...allResults];
+                            currentPage = 0;
+                            
+                            document.getElementById('resultCount').textContent = 
+                                `${resultsData.total} jobs found`;
+                            
+                            renderResults();
+                            document.getElementById('resultsContainer').style.display = 'block';
+                            document.getElementById('progress').style.display = 'none';
+                        }
+                        
+                        btn.disabled = false;
+                        document.getElementById('spinner').style.display = 'none';
+                        document.getElementById('btnText').textContent = 'Start Scraping';
+                    }
+                }, 500);
+
+            } catch (error) {
+                document.getElementById('errorText').textContent = error.message;
+                document.getElementById('error').style.display = 'block';
+                btn.disabled = false;
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('btnText').textContent = 'Start Scraping';
+            }
+        }
+
+        function filterResults() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const category = document.getElementById('categoryFilter').value;
+
+            filteredResults = allResults.filter(job => {
+                const matchesSearch = 
+                    job.Company.toLowerCase().includes(searchTerm) ||
+                    job['Role Title'].toLowerCase().includes(searchTerm) ||
+                    job.Location.toLowerCase().includes(searchTerm);
+                
+                const matchesCategory = !category || job.Category === category;
+
+                return matchesSearch && matchesCategory;
+            });
+
+            currentPage = 0;
+            renderResults();
+        }
+
+        function renderResults() {
+            const tbody = document.getElementById('tableBody');
+            tbody.innerHTML = '';
+
+            const start = currentPage * resultsPerPage;
+            const end = start + resultsPerPage;
+            const pageResults = filteredResults.slice(start, end);
+
+            if (pageResults.length === 0 && currentPage === 0) {
+                document.getElementById('emptyState').style.display = 'block';
+                document.getElementById('resultsContainer').style.display = 'none';
+                return;
+            }
+
+            pageResults.forEach(job => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td><strong>${job.Company}</strong></td>
+                    <td>${job['Role Title']}</td>
+                    <td>${job.Location}</td>
+                    <td><span class="type-badge">${job.Type}</span></td>
+                    <td>
+                        <a href="${job['Apply Link']}" target="_blank" class="btn btn-link">
+                            Apply
+                        </a>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+
+            // Update pagination
+            const totalPages = Math.ceil(filteredResults.length / resultsPerPage);
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+
+            if (totalPages > 1) {
+                for (let i = 0; i < totalPages; i++) {
+                    const btn = document.createElement('button');
+                    btn.textContent = i + 1;
+                    btn.className = i === currentPage ? 'page-btn active' : 'page-btn';
+                    btn.onclick = () => {
+                        currentPage = i;
+                        renderResults();
+                        document.querySelector('.results-table').scrollIntoView({ behavior: 'smooth' });
+                    };
+                    pagination.appendChild(btn);
+                }
+            }
+        }
+
+        // Event listeners
+        document.getElementById('searchInput').addEventListener('input', filterResults);
+        document.getElementById('categoryFilter').addEventListener('change', filterResults);
+    </script>
+</body>
+</html>
